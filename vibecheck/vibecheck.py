@@ -3,6 +3,7 @@ import time
 import os
 import re
 import asyncio
+import random
 from typing import Dict, Optional, List, Union
 
 import discord
@@ -240,9 +241,9 @@ class Vibecheck(commands.Cog):
                     if breeder_role_id and any(role.id == breeder_role_id for role in ctx.message.author.roles):
                         vibe = 20
                     else:
-                        vibe = time.time_ns() % 21  # Generate random number between 0 and 20
+                        vibe = random.randrange(21)  # Generate random number between 0 and 20
                 else:
-                    vibe = time.time_ns() % 21  # Generate random number between 0 and 20
+                    vibe = random.randrange(21)  # Generate random number between 0 and 20
                 
                 # Update both current vibe and vibe history
                 await self.config.user(ctx.message.author).vibe.set(vibe)
