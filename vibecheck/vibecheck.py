@@ -306,7 +306,7 @@ class Vibecheck(commands.Cog):
                     user_data['vibe_scores'] = []
                 user_data['vibe_scores'].append(vibe)
 
-            message = ":nuclear_weapon: {} checked their vibe and got **{}**\n{}".format(
+            message = ":rocket::bomb: {} checked their vibe and got **{}**\n{}".format(
                 ctx.message.author.mention, vibe, comment
             )
             
