@@ -297,7 +297,7 @@ class Vibecheck(commands.Cog):
         """You shouldn't have done that."""
         try:
             vibe = 0
-            comment = "You shouldn't have done that"
+            comment = "You shouldn't have done that, dumbass"
 
             # Update both current vibe and vibe history
             await self.config.user(ctx.message.author).vibe.set(vibe)
