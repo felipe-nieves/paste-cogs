@@ -293,6 +293,29 @@ class Vibecheck(commands.Cog):
             print(f"Error in vibecheck: {e}")
 
     @commands.command()
+    async def nukejamehouse(self, ctx: commands.Context):
+        """You shouldn't have done that."""
+        try:
+            vibe = 0
+            comment = "You shouldn't have done that"
+
+            # Update both current vibe and vibe history
+            await self.config.user(ctx.message.author).vibe.set(vibe)
+            async with self.config.user(ctx.message.author).all() as user_data:
+                if 'vibe_scores' not in user_data:
+                    user_data['vibe_scores'] = []
+                user_data['vibe_scores'].append(vibe)
+
+            message = ":nuclear_weapon: {} checked their vibe and got **{}**\n{}".format(
+                ctx.message.author.mention, vibe, comment
+            )
+            
+            await ctx.send(message)
+        except Exception as e:
+            await ctx.send("An error occurred. You probably shouldn't have done that.")
+            print(f"Error in nukejamehouse: {e}")
+
+    @commands.command()
     async def vibestats(self, ctx: commands.Context, user_or_limit: Optional[Union[discord.Member, int]] = None, limit_if_user_provided: Optional[int] = None):
         """View vibe check statistics.
         
