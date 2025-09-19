@@ -39,7 +39,8 @@ class Vibecheck(commands.Cog):
             vibe=0,
             vibe_scores=[],  # List to store all vibe scores
             lastran=datetime.datetime.strftime(datetime.date.today() - datetime.timedelta(days=1), "%Y-%m-%d"),
-            is_vibe_king=False  # Track if user currently has VIBE KING role
+            is_vibe_king=False,  # Track if user currently has VIBE KING role
+            double_down_date="1970-01-01"  # Track the last date the user doubled down
         )
 
         # Birthday message for special occasions
@@ -97,6 +98,66 @@ class Vibecheck(commands.Cog):
             print(f"[Vibecheck] Reset VIBE KING roles at {datetime.datetime.now()}")
         except Exception as e:
             print(f"[Vibecheck] Error in reset_vibe_king_roles: {e}")
+
+    async def _grant_vibe_king_role(self, ctx: commands.Context, member: discord.Member, reason: str = "Rolled a 20 in vibecheck") -> bool:
+        """Grant the VIBE KING role to a member if possible."""
+        guild = ctx.guild
+        if not guild:
+            return False
+
+        vibe_king_role_id = await self.config.guild(guild).vibe_king_role_id()
+        vibe_king_role = guild.get_role(vibe_king_role_id) if vibe_king_role_id else None
+
+        if not vibe_king_role:
+            vibe_king_role = discord.utils.get(guild.roles, name="VIBE KING")
+            if vibe_king_role:
+                await self.config.guild(guild).vibe_king_role_id.set(vibe_king_role.id)
+            elif guild.me and guild.me.guild_permissions.manage_roles:
+                try:
+                    vibe_king_role = await guild.create_role(
+                        name="VIBE KING",
+                        color=discord.Color.gold(),
+                        reason="Created for vibecheck cog"
+                    )
+                    await self.config.guild(guild).vibe_king_role_id.set(vibe_king_role.id)
+                except discord.Forbidden:
+                    vibe_king_role = None
+
+        if vibe_king_role:
+            try:
+                await member.add_roles(vibe_king_role, reason=reason)
+                await self.config.user(member).is_vibe_king.set(True)
+                return True
+            except discord.Forbidden:
+                pass
+
+        return False
+
+    async def _revoke_vibe_king_role(self, ctx: commands.Context, member: discord.Member, reason: str = "Lost VIBE KING status") -> bool:
+        """Remove the VIBE KING role from a member if they have it."""
+        guild = ctx.guild
+        if not guild:
+            return False
+
+        vibe_king_role_id = await self.config.guild(guild).vibe_king_role_id()
+        vibe_king_role = guild.get_role(vibe_king_role_id) if vibe_king_role_id else None
+
+        if not vibe_king_role:
+            vibe_king_role = discord.utils.get(guild.roles, name="VIBE KING")
+            if vibe_king_role:
+                await self.config.guild(guild).vibe_king_role_id.set(vibe_king_role.id)
+
+        if vibe_king_role and vibe_king_role in member.roles:
+            try:
+                await member.remove_roles(vibe_king_role, reason=reason)
+                await self.config.user(member).is_vibe_king.set(False)
+                return True
+            except discord.Forbidden:
+                return False
+
+        # Ensure config flag is cleared if the role no longer exists
+        await self.config.user(member).is_vibe_king.set(False)
+        return False
 
     def cog_unload(self):
         """Clean up when cog is unloaded."""
@@ -206,88 +267,151 @@ class Vibecheck(commands.Cog):
             print(f"Error in vibetest: {e}")
 
     @commands.command()
-    async def vibecheck(self, ctx: commands.Context):
+    async def vibecheck(self, ctx: commands.Context, *, option: Optional[str] = None):
         """Check your vibes for the day.
-        
-        Users can only check their vibes once per day.
-        Returns a random score between 0 and 20 with a corresponding comment.
-        If you roll a 20, you get the VIBE KING role for the day!
+
+        Roll once per day for a fresh vibe score. Use `vibecheck double` to double down—
+        risk your current vibe for a re-roll that can either cut you down or rocket you up.
+        A natural 20 still crowns you VIBE KING.
         """
         try:
-            lastranstr = await self.config.user(ctx.message.author).lastran()
-            lastran = datetime.datetime.strptime(lastranstr, "%Y-%m-%d").date()
+            member = ctx.author
+            user_conf = self.config.user(member)
+            user_data = await user_conf.all()
 
-            if datetime.date.today() == lastran:
-                vibe = await self.config.user(ctx.message.author).vibe()
-                if await self.config.user(ctx.message.author).is_vibe_king():
-                    await ctx.send("You already rolled today. Scroll up King :crown:")
-                else:
-                    await ctx.send("You already rolled today. Scroll up idiot :skull:")
-            else:
-                await self.config.user(ctx.message.author).lastran.set(
-                    datetime.datetime.strftime(datetime.date.today(), "%Y-%m-%d")
+            lastran_str = user_data.get(
+                "lastran",
+                datetime.datetime.strftime(
+                    datetime.date.today() - datetime.timedelta(days=1),
+                    "%Y-%m-%d"
                 )
-                    
-                # Check if user ID is the special case that should always roll 0
-                if str(ctx.message.author.id) == "69420":
-                    vibe = 0
-                # Check if it's the user's birthday
-                elif await self._is_users_birthday(ctx.message.author):
+            )
+            lastran = datetime.datetime.strptime(lastran_str, "%Y-%m-%d").date()
+            today = datetime.date.today()
+            today_str = today.strftime("%Y-%m-%d")
+
+            option_normalized = option.lower().strip() if option else None
+            double_down_requested = False
+            if option_normalized:
+                if option_normalized in {"double", "double down", "doubledown", "double-down"}:
+                    double_down_requested = True
+                else:
+                    await ctx.send("Unknown vibecheck option. Try `vibecheck double` to double down.")
+                    return
+
+            if double_down_requested:
+                if lastran != today:
+                    await ctx.send("You need to roll your vibe before doubling down.")
+                    return
+
+                last_double_down = user_data.get("double_down_date", "1970-01-01")
+                if last_double_down == today_str:
+                    await ctx.send("You've already doubled down today. Save some mojo for tomorrow.")
+                    return
+
+                current_vibe = user_data.get("vibe", 0)
+                new_roll = random.randrange(21)
+                message_lines = [f":game_die: {member.mention} doubled down and re-rolled **{new_roll}**."]
+
+                if new_roll < 10:
+                    penalty = 10 - new_roll
+                    final_vibe = max(0, current_vibe - penalty)
+                    message_lines.append(f"Your vibe drops by {penalty} to **{final_vibe}**.")
+                else:
+                    final_vibe = new_roll * 2
+                    message_lines.append(f"Your vibe surges to **{final_vibe}**!")
+
+                comment = self._get_vibe_comment(final_vibe)
+                message_lines.append(comment)
+
+                vibe_scores = await user_conf.vibe_scores()
+                if not vibe_scores:
+                    vibe_scores = []
+                if vibe_scores:
+                    vibe_scores[-1] = final_vibe
+                else:
+                    vibe_scores.append(final_vibe)
+
+                await user_conf.vibe_scores.set(vibe_scores)
+                await user_conf.vibe.set(final_vibe)
+                await user_conf.double_down_date.set(today_str)
+
+                if new_roll == 20:
+                    granted = await self._grant_vibe_king_role(
+                        ctx,
+                        member,
+                        reason="Rolled a 20 while doubling down"
+                    )
+                    if granted:
+                        message_lines.append("👑 You've been granted the VIBE KING role for the day! 👑")
+                else:
+                    if user_data.get("is_vibe_king"):
+                        lost = await self._revoke_vibe_king_role(
+                            ctx,
+                            member,
+                            reason="Lost VIBE KING while doubling down"
+                        )
+                        if lost:
+                            message_lines.append("👑 The crown slips away when you double down and lose...")
+
+                await ctx.send("\n".join(message_lines))
+                return
+
+            if today == lastran:
+                double_down_available = user_data.get("double_down_date", "1970-01-01") != today_str
+                if user_data.get("is_vibe_king"):
+                    message = "You already rolled today. Scroll up King :crown:"
+                else:
+                    message = "You already rolled today. Scroll up idiot :skull:"
+
+                if double_down_available:
+                    message += " (Use `vibecheck double` to double down.)"
+
+                await ctx.send(message)
+                return
+
+            await user_conf.lastran.set(today_str)
+
+            # Check if user ID is the special case that should always roll 0
+            if str(member.id) == "69420":
+                vibe = 0
+                comment = self._get_vibe_comment(vibe)
+            else:
+                is_birthday = await self._is_users_birthday(member)
+                if is_birthday:
                     vibe = 20
                     comment = self.BIRTHDAY_MESSAGE
-                # Check if it's Father's Day and user has breeder role
                 elif self._is_fathers_day():
-                    breeder_role_id = await self.config.guild(ctx.guild).breeder_role_id()
-                    if breeder_role_id and any(role.id == breeder_role_id for role in ctx.message.author.roles):
+                    breeder_role_id = await self.config.guild(ctx.guild).breeder_role_id() if ctx.guild else None
+                    if breeder_role_id and any(role.id == breeder_role_id for role in member.roles):
                         vibe = 20
+                        comment = self._get_vibe_comment(vibe)
                     else:
-                        vibe = random.randrange(21)  # Generate random number between 0 and 20
+                        vibe = random.randrange(21)
+                        comment = self._get_vibe_comment(vibe)
                 else:
-                    vibe = random.randrange(21)  # Generate random number between 0 and 20
-                
-                # Update both current vibe and vibe history
-                await self.config.user(ctx.message.author).vibe.set(vibe)
-                async with self.config.user(ctx.message.author).all() as user_data:
-                    if 'vibe_scores' not in user_data:
-                        user_data['vibe_scores'] = []
-                    user_data['vibe_scores'].append(vibe)
-
-                # Get comment if not birthday (birthday comment is set above)
-                if not await self._is_users_birthday(ctx.message.author):
+                    vibe = random.randrange(21)
                     comment = self._get_vibe_comment(vibe)
-                
-                message = ":game_die: {} checked their vibe and got **{}**\n{}".format(
-                    ctx.message.author.mention, vibe, comment
-                )
-                
-                # Add VIBE KING role if user rolled a 20
-                if vibe == 20:
-                    vibe_king_role_id = await self.config.guild(ctx.guild).vibe_king_role_id()
-                    if vibe_king_role_id:
-                        vibe_king_role = ctx.guild.get_role(vibe_king_role_id)
-                    else:
-                        vibe_king_role = discord.utils.get(ctx.guild.roles, name="VIBE KING")
-                        
-                        if not vibe_king_role and ctx.guild.me.guild_permissions.manage_roles:
-                            try:
-                                vibe_king_role = await ctx.guild.create_role(
-                                    name="VIBE KING",
-                                    color=discord.Color.gold(),
-                                    reason="Created for vibecheck cog"
-                                )
-                                await self.config.guild(ctx.guild).vibe_king_role_id.set(vibe_king_role.id)
-                            except discord.Forbidden:
-                                vibe_king_role = None
-                    
-                    if vibe_king_role:
-                        try:
-                            await ctx.author.add_roles(vibe_king_role, reason="Rolled a 20 in vibecheck")
-                            await self.config.user(ctx.message.author).is_vibe_king.set(True)
-                            message += "\n👑 You've been granted the VIBE KING role for the day! 👑"
-                        except discord.Forbidden:
-                            pass  # Bot doesn't have permission, silently continue
-                
-                await ctx.send(message)
+
+            # Update both current vibe and vibe history
+            await user_conf.vibe.set(vibe)
+            async with self.config.user(member).all() as stored_data:
+                if 'vibe_scores' not in stored_data:
+                    stored_data['vibe_scores'] = []
+                stored_data['vibe_scores'].append(vibe)
+
+            message = ":game_die: {} checked their vibe and got **{}**\n{}".format(
+                member.mention,
+                vibe,
+                comment
+            )
+
+            if vibe == 20:
+                granted = await self._grant_vibe_king_role(ctx, member)
+                if granted:
+                    message += "\n👑 You've been granted the VIBE KING role for the day! 👑"
+
+            await ctx.send(message)
         except Exception as e:
             await ctx.send("An error occurred while checking your vibes. Please try again later.")
             print(f"Error in vibecheck: {e}")
